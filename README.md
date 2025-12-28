@@ -1,5 +1,8 @@
 # flashattention_from_scratch
 
+CUDA 12.9
+python 3.12
+
 ## Workload breakdown from GPT(day-level) 
 
 ### Phase 0 — Prep & design (½–1 day)
