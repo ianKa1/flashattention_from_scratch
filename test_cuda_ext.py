@@ -1,23 +1,13 @@
 import torch
-import flash_attn_ext  # This is your CUDA extension
+import flash_attn_ext  # The name of your extension
 
-def my_flash_attention_forward(query, key, value):
-    # Ensure query, key, value are on the GPU
-    assert query.is_cuda
-    assert key.is_cuda
-    assert value.is_cuda
+# Create tensor inputs (on GPU)
+query = torch.randn(128, 8, 128, 64, device='cuda', dtype=torch.float16)
+key = torch.randn(128, 8, 128, 64, device='cuda', dtype=torch.float16)
+value = torch.randn(128, 8, 128, 64, device='cuda', dtype=torch.float16)
+out = torch.zeros_like(query)
 
-    # Call the custom CUDA kernel function
-    out = flash_attn_ext.forward(query, key, value)
-    
-    return out
+# Call the kernel (wrapped in your PyTorch extension)
+out = flash_attn_ext.flash_attn_forward(query, key, value)
 
-print("hello?")
-# Test with dummy data
-B, H, L, Dh = 1, 8, 16, 128
-query = torch.randn(B, H, L, Dh, device="cuda")
-key = torch.randn(B, H, L, Dh, device="cuda")
-value = torch.randn(B, H, L, Dh, device="cuda")
-
-output = my_flash_attention_forward(query, key, value)
-print(output.shape)
+print(out)

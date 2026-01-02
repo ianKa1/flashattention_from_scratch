@@ -1,42 +1,74 @@
+#include <cuda_fp16.h>  // Required for half precision (FP16)
 #include <torch/extension.h>
-#include <cuda_fp16.h>
 
-__global__ void add_kernel(half* q, half* k, half* out) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    out[0] = __float2half(42.0f);
+#define BLOCK_SIZE 32
+
+// CUDA kernel for FlashAttention
+__global__ void flash_attention_kernel(half* query, half* key, half* value, half* out, int Lq, int Lk, int H, int Dh) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int head_id = blockIdx.y;  // For multi-head attention
+
+    // Shared memory for each block
+    // __shared__ half shared_q[BLOCK_SIZE][BLOCK_SIZE];
+    // __shared__ half shared_k[BLOCK_SIZE][BLOCK_SIZE];
+    // __shared__ half shared_v[BLOCK_SIZE][BLOCK_SIZE];
+    
+    if (idx < Lq) {
+        // Load query, key, and value from global memory to shared memory
+        // shared_q[threadIdx.x][threadIdx.y] = query[head_id * Lq * Dh + idx];
+        // shared_k[threadIdx.x][threadIdx.y] = key[head_id * Lk * Dh + idx];
+        // shared_v[threadIdx.x][threadIdx.y] = value[head_id * Lk * Dh + idx];
+        
+        // __syncthreads();
+
+        // // Compute QKᵀ (dot product)
+        // half dot_product = __float2half(0.0f);
+        // for (int i = 0; i < BLOCK_SIZE; i++) {
+        //     dot_product += shared_q[threadIdx.x][i] * shared_k[threadIdx.y][i];
+        // }
+        
+        // float dot_f = __half2float(dot_product);
+        // float sum_f = __half2float(sum_exp);   // assuming sum_exp is half
+
+        // float softmax_f = expf(dot_f) / sum_f;
+        // half softmax_out = __float2half(softmax_f);
+        
+        // Multiply with value to get final output
+        out[head_id * Lq + idx] = __float2half(42.0f);
+    }
 }
 
-torch::Tensor flash_attn_forward(torch::Tensor q, torch::Tensor k, torch::Tensor v) {
-    // Ensure tensors are on the GPU
-    assert(q.is_cuda());
-    assert(k.is_cuda());
-    assert(v.is_cuda());
+void flash_attn_forward_cuda(
+    torch::Tensor query,
+    torch::Tensor key,
+    torch::Tensor value,
+    torch::Tensor &output
+) {
+    TORCH_CHECK(query.is_cuda(), "query must be CUDA");
+    TORCH_CHECK(query.scalar_type() == at::kHalf, "query must be fp16");
 
-    // Allocate output tensor
-    auto out = torch::zeros_like(q);
+    int B  = query.size(0);
+    int H  = query.size(1);
+    int Lq = query.size(2);
+    int Dh = query.size(3);
+    int Lk = key.size(2);
 
-    int B = q.size(0);
-    int H = q.size(1);
-    int L = q.size(2);
-    int Dh = q.size(3);
-    printf("B: %d, H: %d, L: %d, Dh: %d\n", B, H, L, Dh);
-    for (int i = 0; i < B; i++) {
-        for (int j = 0; j < H; j++) {
-            for (int l = 0; l < L; l++) {
-                for (int d = 0; d < Dh; d++) {
-                    printf("q[%d][%d][%d][%d]: %f\n", i, j, l, d, q[i][j][l][d].item<half>());
-                }
-            }
-        }
-    }
+    // ---------------------------------------------
+    // GRID & BLOCK CONFIGURATION
+    // ---------------------------------------------
+    dim3 threads(BLOCK_SIZE, BLOCK_SIZE, 1);
+    dim3 blocks(
+        (Lq + BLOCK_SIZE - 1) / BLOCK_SIZE, // tiles over query length
+        H,                                  // heads
+        B                                   // batch
+    );
 
-    // Kernel launch configuration
-    int threads = 1024;
-    int blocks = (q.size(0) + threads - 1) / threads;
+    flash_attention_kernel<<<blocks, threads>>>(
+        reinterpret_cast<half*>(query.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(key.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(value.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+        Lq, Lk, H, Dh
+    );
 
-    // Launch the kernel
-    add_kernel<<<blocks, threads>>>(q.data_ptr<half>(), k.data_ptr<half>(), out.data_ptr<half>());
-
-    // Return the result
-    return out;
 }
