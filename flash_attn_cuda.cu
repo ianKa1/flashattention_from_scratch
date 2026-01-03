@@ -1,5 +1,5 @@
-#include <cuda_fp16.h>  // Required for half precision (FP16)
-#include <torch/extension.h>
+#include "flash_attn_cuda.h"
+#include <cstdio>
 
 #define BLOCK_SIZE 32
 
@@ -34,41 +34,45 @@ __global__ void flash_attention_kernel(half* query, half* key, half* value, half
         // half softmax_out = __float2half(softmax_f);
         
         // Multiply with value to get final output
-        out[head_id * Lq + idx] = __float2half(42.0f);
+        out[0] = __float2half(42.0f);
     }
 }
 
-void flash_attn_forward_cuda(
-    torch::Tensor query,
-    torch::Tensor key,
-    torch::Tensor value,
-    torch::Tensor &output
+void launch_flash_attention_kernel(
+    half* q,
+    half* k,
+    half* v,
+    half* out,
+    int Lq, int Lk, int H, int Dh
 ) {
-    TORCH_CHECK(query.is_cuda(), "query must be CUDA");
-    TORCH_CHECK(query.scalar_type() == at::kHalf, "query must be fp16");
+    dim3 grid(1);
+    dim3 block(1);
+    flash_attention_kernel<<<grid, block>>>(q, k, v, out, Lq, Lk, H, Dh);
+}
 
-    int B  = query.size(0);
-    int H  = query.size(1);
-    int Lq = query.size(2);
-    int Dh = query.size(3);
-    int Lk = key.size(2);
+/*
+    q (B, H, Lq, Dh)
+    k (B, H, Lk, Dh)
+    v (B, H, Lk, Dh)
 
-    // ---------------------------------------------
-    // GRID & BLOCK CONFIGURATION
-    // ---------------------------------------------
-    dim3 threads(BLOCK_SIZE, BLOCK_SIZE, 1);
-    dim3 blocks(
-        (Lq + BLOCK_SIZE - 1) / BLOCK_SIZE, // tiles over query length
-        H,                                  // heads
-        B                                   // batch
-    );
 
-    flash_attention_kernel<<<blocks, threads>>>(
-        reinterpret_cast<half*>(query.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(key.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(value.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(output.data_ptr<at::Half>()),
-        Lq, Lk, H, Dh
-    );
+*/
+__global__ void attention_kernel(half* query, half* key, half* value, half* out, int Lq, int Lk, int H, int Dh) {
+    // half* softmax_o;
+    // cudaMalloc
+    // for (int i = 0; i < B; i++)
+    //     for (int j = 0; j < H; j++) {
+    //         for (int lq = 0; lq < Lq; lq++)
+    //             for (int lk = 0; lk < Lk; lk++)
+    //                 for (int k = 0; k < Dh; k++)
+                        
 
+    //     }
+}
+
+# without any optimization
+void launch_attention_kernel() {
+    dim3 grid(1);
+    dim3 block(1);
+    attention_kernel<<<grid, block>>>(q, k, v, out, Lq, Lk, H, Dh);
 }
