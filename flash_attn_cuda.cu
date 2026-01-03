@@ -54,25 +54,53 @@ void launch_flash_attention_kernel(
     q (B, H, Lq, Dh)
     k (B, H, Lk, Dh)
     v (B, H, Lk, Dh)
+    o (B, H, Lq, Dh)
 
+    softmax(B, H, Lq, Lk)
 
 */
-__global__ void attention_kernel(half* query, half* key, half* value, half* out, int Lq, int Lk, int H, int Dh) {
+__global__ void attention_kernel(half* query, half* key, half* value, half* out, int Lq, int Lk, int H, int Dh, float* softmax_o) {
     // half* softmax_o;
     // cudaMalloc
-    // for (int i = 0; i < B; i++)
-    //     for (int j = 0; j < H; j++) {
-    //         for (int lq = 0; lq < Lq; lq++)
-    //             for (int lk = 0; lk < Lk; lk++)
-    //                 for (int k = 0; k < Dh; k++)
-                        
+    float inv_sqrt_d = rsqrtf(__half2float(Dh));
+    for (int i = 0; i < B; i++)
+        for (int j = 0; j < H; j++) {
+            for (int lq = 0; lq < Lq; lq++)
+                for (int lk = 0; lk < Lk; lk++)
+                    for (int k = 0; k < Dh; k++)
+                        softmax_o[i*H*Lq*Lk + j*Lq*Lk + lq*Lk + lk] += __float2half(query[i*H*Lq*Dh + j*Lq*Dh + lq*Dh + k]) 
+                                                                        * __float2half(key[i*H*Lq*Dh + j*Lq*Dh + lk*Dh + k]) * inv_sqrt_d;
+        }
 
-    //     }
+    for (int i = 0; i < B; i++)
+        for (int j = 0; j < H; j++) 
+            for (int lq = 0; lq < Lq; lq++) {
+                float sum = 0f;
+                for (int lk = 0; lk < Lk; lk++) {
+                    softmax_o[i*H*Lq*Lk + j*Lq*Lk + lq*Lk + lk] = expf(softmax_o[i*H*Lq*Lk + j*Lq*Lk + lq*Lk + lk])
+                    sum += softmax_o[i*H*Lq*Lk + j*Lq*Lk + lq*Lk + lk];
+                }
+                for (int lk = 0; lk < Lk; lk++)
+                softmax_o[i*H*Lq*Lk + j*Lq*Lk + lq*Lk + lk] /= sum;
+        }
+
+    for (int i = 0; i < B; i++)
+        for (int j = 0; j < H; j++)
+            for (int lq = 0; lq < Lq; lq++)
+                for (int d = 0; d < Dh; d++) {
+                    float sum_o = 0f;
+                    for (int lk = 0; lk < Lk; lk++)
+                        sum_o += softmax_o[i*H*Lq*Lk + j*Lq*Lk + lq*Lk + lk] * v[i*H*Lq*Dh + j*Lq*Dh + lk*Dh + d];
+                    o[i*H*Lq*Dh + j*Lq*Dh + lq*Dh + d] = sum_o;
+                }
 }
 
 # without any optimization
 void launch_attention_kernel() {
     dim3 grid(1);
     dim3 block(1);
-    attention_kernel<<<grid, block>>>(q, k, v, out, Lq, Lk, H, Dh);
+    float* softmax_o;
+    cudaMalloc((void**)&softmax_o, B * H * Lq * Lk * sizeof(float));
+    cudaMemset(softmax_o, 0, B * H * Lq * Lk * sizeof(float));
+    attention_kernel<<<grid, block>>>(q, k, v, out, Lq, Lk, H, Dh, softmax_o);
 }
